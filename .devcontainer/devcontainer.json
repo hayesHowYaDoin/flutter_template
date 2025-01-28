@@ -1,7 +1,7 @@
 {
     "name": "Flutter Template Dev Container",
     "build": {
-        "dockerfile": "Dockerfile",
+        "image": "ghcr.io/xtruder/nix-devcontainer:v1",
         "context": "${localWorkspaceFolder}",
         "args": {
             "USER_UID": "${localEnv:USER_UID}",

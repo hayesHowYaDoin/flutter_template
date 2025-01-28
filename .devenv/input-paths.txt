@@ -1,3 +1,0 @@
-/home/jordan/repos/flutter_template/devenv.lock
-/home/jordan/repos/flutter_template/devenv.nix
-/home/jordan/repos/flutter_template/devenv.yaml
