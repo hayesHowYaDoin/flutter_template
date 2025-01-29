@@ -4,20 +4,25 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    devshell.url = "github:numtide/devshell";
+    devenv.url = "github:cachix/devenv";
     nix-github-actions.url = "github:nix-community/nix-github-actions";
     android.url = "github:tadfisher/android-nixpkgs";
+  };
+
+  nixConfig = {
+    extra-trusted-public-keys = "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=";
+    extra-substituters = "https://devenv.cachix.org";
   };
 
   outputs = {
     self,
     nixpkgs,
     flake-utils,
-    devshell,
+    devenv,
     nix-github-actions,
     android,
     ...
-  }:
+  }@inputs:
     {
       overlay = final: prev: {
         inherit (self.packages.${final.system}) android-sdk android-studio;
@@ -30,43 +35,53 @@
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
-          overlays = [
-            devshell.overlays.default
-            self.overlay
+        };
+
+        # Work around the lack of extension ordering in VS Code
+        # See: https://github.com/Microsoft/vscode/issues/57481#issuecomment-910883638
+        loadAfter = deps: pkg: pkg.overrideAttrs (old: {
+          nativeBuildInputs = old.nativeBuildInputs or [] ++ [ pkgs.jq pkgs.moreutils ];
+
+          preInstall = ''
+            ${old.preInstall or ""}
+            jq '.extensionDependencies |= . + $deps' \
+            --argjson deps ${lib.escapeShellArg (builtins.toJSON deps)} \
+            package.json | sponge package.json
+          '';
+        });
+
+        extensions = with pkgs.vscode-extensions; [
+	        mkhl.direnv
+          (loadAfter [ "mkhl.direnv" ] bbenoist.nix)
+          (loadAfter [ "mkhl.direnv" ] dart-code.flutter)
+          (loadAfter [ "mkhl.direnv" ] jnoortheen.nix-ide)
+        ];
+      in {
+        packages.devenv-up = self.devShells.${system}.default.config.procfileScript;
+        packages.devenv-test = self.devShells.${system}.default.config.test;
+
+        devShell = devenv.lib.mkShell {
+          inherit pkgs inputs;
+          modules = [
+            ({ pkgs, config, ... }: {
+              devcontainer.enable = true;
+
+              packages = with pkgs; [
+                flutter
+                chromium
+              ] ++ [
+                (vscode-with-extensions.overrideAttrs (finalAttrs: previousAttrs: {
+                  vscodeExtensions = previousAttrs.vscodeExtensions ++ extensions;
+                }))
+              ];
+
+              android = {
+                enable = true;
+                flutter.enable = true;
+              };
+            })
           ];
         };
-      in {
-        packages = {
-          android-sdk = android.sdk.${system} (sdkPkgs: with sdkPkgs; [
-            # Useful packages for building and testing.
-            build-tools-34-0-0
-            cmdline-tools-latest
-            emulator
-            platform-tools
-            platforms-android-34
-
-            # Other useful packages for a development environment.
-            # ndk-26-1-10909125
-            # skiaparser-3
-            # sources-android-34
-          ]
-          ++ lib.optionals (system == "aarch64-darwin") [
-            # system-images-android-34-google-apis-arm64-v8a
-            # system-images-android-34-google-apis-playstore-arm64-v8a
-          ]
-          ++ lib.optionals (system == "x86_64-darwin" || system == "x86_64-linux") [
-            # system-images-android-34-google-apis-x86-64
-            # system-images-android-34-google-apis-playstore-x86-64
-          ]);
-        } // lib.optionalAttrs (system == "x86_64-linux") {
-          # Android Studio in nixpkgs is currently packaged for x86_64-linux only.
-          android-studio = pkgs.androidStudioPackages.stable;
-          # android-studio = pkgs.androidStudioPackages.beta;
-          # android-studio = pkgs.androidStudioPackages.preview;
-          # android-studio = pkgs.androidStudioPackage.canary;
-        };
-
-        devShell = import ./devshell.nix { inherit pkgs; };
       }
     );
 }
